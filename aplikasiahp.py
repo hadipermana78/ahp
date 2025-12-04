@@ -568,72 +568,100 @@ elif page == "Hasil Akhir Penilaian":
 # ------------------------------
 # Halaman: Admin Panel
 # ------------------------------
-# ===============================
-# ADMIN PANEL
-# ===============================
-if "user_is_admin" not in st.session_state:
-    st.session_state.user_is_admin = False
+elif page == "Admin Panel" and user["is_admin"]:
 
-elif page == "Admin Panel" and user_is_admin:
+    st.header("📊 Admin Panel – Manajemen Penilaian Pakar")
 
-    st.title("📊 Admin Panel – Manajemen Penilaian Pakar")
+    # Ambil seluruh submission + nama user
+    cur.execute("""
+        SELECT 
+            s.id, 
+            u.username,
+            s.timestamp,
+            s.result_json
+        FROM submissions s
+        JOIN users u ON u.id = s.user_id
+        ORDER BY s.id DESC
+    """)
+    data = cur.fetchall()
 
-    # Ambil semua penilaian
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query("""
-        SELECT submissions.id, users.username, submissions.timestamp
-        FROM submissions
-        JOIN users ON submissions.user_id = users.id
-        ORDER BY submissions.timestamp DESC
-    """, conn)
-    conn.close()
-
-    if df.empty:
-        st.info("Belum ada data penilaian.")
+    if not data:
+        st.info("Belum ada submission dari pakar.")
         st.stop()
 
-    st.subheader("📄 Daftar Semua Penilaian")
-    st.dataframe(df)
+    # Tampilkan tabel ringkasan
+    table_data = []
+    for sid, username, ts, result_json in data:
+        res = json.loads(result_json)
+        main_w = res["main"]["weights"]
 
-    st.subheader("🗑 Hapus Penilaian")
+        table_data.append({
+            "ID": sid,
+            "User": username,
+            "Timestamp": ts,
+            "CR Utama": res["main"]["cons"]["CR"],
+            "Bobot Kriteria": ", ".join(f"{w:.3f}" for w in main_w)
+        })
 
-    delete_id = st.selectbox(
-        "Pilih ID penilaian yang ingin dihapus",
-        df["id"].tolist()
+    df_admin = pd.DataFrame(table_data)
+    st.dataframe(df_admin, use_container_width=True)
+
+    st.markdown("---")
+
+    # ---------------------
+    # DELETE SUBMISSION
+    # ---------------------
+    st.subheader("🗑 Hapus Submission Pakar")
+
+    del_id = st.number_input("Masukkan ID submission yang ingin dihapus", step=1, min_value=1)
+
+    if st.button("Hapus Submission"):
+        try:
+            delete_submission(del_id)
+            st.success(f"Submission #{del_id} telah dihapus.")
+            st.rerun()
+        except:
+            st.error("Gagal menghapus data. Periksa ID submission.")
+
+    st.markdown("---")
+
+    # ---------------------
+    # EXPORT SEMUA DATA
+    # ---------------------
+    st.subheader("📥 Download Semua Data (Excel)")
+
+    # Siapkan Excel
+    excel_output = BytesIO()
+    with pd.ExcelWriter(excel_output, engine="openpyxl") as writer:
+
+        df_admin.to_excel(writer, sheet_name="Ringkasan_Admin", index=False)
+
+        # Tambahkan setiap submission sebagai sheet terpisah
+        for sid, username, ts, result_json in data:
+            res = json.loads(result_json)
+
+            df_main = pd.DataFrame({
+                "Kriteria": res['main']['keys'],
+                "Bobot": res['main']['weights']
+            })
+
+            df_global = pd.DataFrame(res["global"]).sort_values(
+                "GlobalWeight", ascending=False
+            )
+
+            df_main.to_excel(writer, sheet_name=f"Main_{sid}", index=False)
+            df_global.to_excel(writer, sheet_name=f"Global_{sid}", index=False)
+
+    excel_output.seek(0)
+
+    st.download_button(
+        "📊 Download Semua Data Excel",
+        data=excel_output,
+        file_name="all_submissions.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Tampilkan informasi penilaian yang dipilih
-    row = df[df["id"] == delete_id].iloc[0]
-    st.write(f"**User:** {row['username']}  \n**Waktu:** {row['timestamp']}")
 
-    # Konfirmasi delete
-    konfirmasi = st.checkbox("Saya yakin ingin menghapus penilaian ini")
-
-    if st.button("⚠ Hapus Penilaian", type="primary"):
-        if not konfirmasi:
-            st.warning("Centang konfirmasi terlebih dahulu.")
-            st.stop()
-
-        delete_submission(delete_id)
-        st.success(f"Penilaian dengan ID {delete_id} berhasil dihapus.")
-
-        st.experimental_rerun()
-
-        # -------------------------
-        # KONFIRMASI DELETE
-        # -------------------------
-        confirm = st.checkbox(
-            f"Saya yakin ingin menghapus penilaian ID {delete_id}",
-            help="Centang untuk mengonfirmasi penghapusan"
-        )
-
-        if st.button("Hapus Penilaian Sekarang", type="primary"):
-            if confirm:
-                delete_submission(delete_id)
-                st.success(f"Penilaian dengan ID {delete_id} berhasil dihapus!")
-                st.experimental_rerun()
-            else:
-                st.error("Konfirmasi dulu sebelum menghapus penilaian.")
 
 
 # ------------------------------
@@ -879,4 +907,5 @@ elif user['is_admin'] and page == "Laporan Final Gabungan Pakar":
         file_name="gabungan_pakar.pdf",
         mime="application/pdf"
     )
+
 

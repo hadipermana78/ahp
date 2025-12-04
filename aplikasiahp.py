@@ -571,6 +571,9 @@ elif page == "Hasil Akhir Penilaian":
 # ===============================
 # ADMIN PANEL
 # ===============================
+if "user_is_admin" not in st.session_state:
+    st.session_state.user_is_admin = False
+
 elif page == "Admin Panel" and user_is_admin:
 
     st.title("📊 Admin Panel – Manajemen Penilaian Pakar")
@@ -876,3 +879,4 @@ elif user['is_admin'] and page == "Laporan Final Gabungan Pakar":
         file_name="gabungan_pakar.pdf",
         mime="application/pdf"
     )
+

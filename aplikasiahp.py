@@ -330,22 +330,60 @@ else:
     page = st.sidebar.selectbox("Halaman", 
         ["Isi Kuesioner", "My Submissions", "Hasil Akhir Penilaian"])
 
+# ------------------------------
+# NEW: improved pairwise_inputs (replaces older version)
+# ------------------------------
+def _short_key(prefix, a, b):
+    """Buat key singkat unik untuk widget dari pasangan a/b."""
+    h = hashlib.sha1((prefix + "::" + a + "|||" + b).encode("utf-8")).hexdigest()
+    return h[:12]
+
 def pairwise_inputs(items, key_prefix):
+    """
+    Versi layout rapi:
+    - Tampilkan label panjang di kolom kiri dan kanan (boleh membungkus normal).
+    - Tengah: radio singkat 'L' / 'R' (tidak akan di-wrap per huruf).
+    - Kanan: selectbox 1..9 untuk skala.
+    Mengembalikan dict dengan key (a,b) -> nilai (float).
+    """
     pairs = list(itertools.combinations(items, 2))
     out = {}
-    for (a,b) in pairs:
-        cols = st.columns([4,0.6,4,2])
-        cols[0].write(a)
-        cols[1].write("vs")
-        cols[2].write(b)
-        direction_key = f"{key_prefix}_{a}_{b}_dir"
-        scale_key = f"{key_prefix}_{a}_{b}_scale"
-        direction = cols[1].radio("", [a, b], key=direction_key, horizontal=True, label_visibility="collapsed")
-        val = cols[3].selectbox("", options=list(range(1,10)), key=scale_key)
-        if direction == a:
-            out[(a,b)] = float(val)
+    for (a, b) in pairs:
+        # Proporsi: kiri besar, tengah kecil, kanan besar, paling kanan untuk skala
+        col_left, col_choice, col_right, col_scale = st.columns([6, 1, 6, 2])
+
+        # Tampilkan teks lengkap pada kolom kiri/kanan (word-wrap normal)
+        col_left.markdown(f"<div style='white-space:normal'>{a}</div>", unsafe_allow_html=True)
+        col_right.markdown(f"<div style='white-space:normal'>{b}</div>", unsafe_allow_html=True)
+
+        # Buat key singkat unik
+        kshort = _short_key(key_prefix, a, b)
+
+        # Radio singkat untuk arah — 'L' artinya item kiri lebih penting; 'R' item kanan
+        direction = col_choice.radio(
+            label="",
+            options=["L", "R"],
+            index=0,
+            key=f"{kshort}_dir",
+            label_visibility="collapsed",
+            horizontal=True
+        )
+
+        # Scale 1..9
+        val = col_scale.selectbox(
+            label="",
+            options=list(range(1, 10)),
+            index=0,
+            key=f"{kshort}_scale",
+            label_visibility="collapsed"
+        )
+
+        # Map result ke numeric sesuai arah
+        if direction == "L":
+            out[(a, b)] = float(val)
         else:
-            out[(a,b)] = float(1.0/val)
+            out[(a, b)] = float(1.0 / val)
+
     return out
 
 # ------------------------------
@@ -382,13 +420,11 @@ if page == "Isi Kuesioner":
                 global_rows.append({"Kriteria": group, "SubKriteria": sk, "LocalWeight": float(lw), "MainWeight": float(main_w[i]), "GlobalWeight": float(main_w[i]*lw)})
 
         result = {
-            # <<< PERBAIKAN: simpan juga matriks utama (main_mat) dalam bentuk list-of-lists agar nanti bisa direkonstruksi
             "main": {"keys": CRITERIA, "weights": list(map(float,main_w)), "cons": main_cons, "mat": main_mat.tolist()},
             "local": local,
             "global": global_rows
         }
         ts = datetime.now().isoformat()
-        # simpan main_pairs dan sub_pairs (stringified) untuk rekonstruksi AIJ nanti
         main_pairs_store = {f"{a} ||| {b}": v for (a,b),v in main_pairs.items()}
         cur.execute("INSERT INTO submissions (user_id, timestamp, main_pairs, sub_pairs, result_json) VALUES (?,?,?,?,?)",
                     (user['id'], ts, json.dumps(main_pairs_store), json.dumps(sub_pairs), json.dumps(result)))
@@ -413,7 +449,6 @@ elif page == "My Submissions":
             st.table(dfg)
             col1, col2 = st.columns(2)
             with col1:
-                # langsung tampilkan download button tanpa nested st.button
                 df_main = pd.DataFrame({"Kriteria": res['main']['keys'], "Weight": res['main']['weights']})
                 df_global = pd.DataFrame(res['global']).sort_values("GlobalWeight", ascending=False)
                 out = BytesIO()
@@ -423,7 +458,6 @@ elif page == "My Submissions":
                 out.seek(0)
                 st.download_button(f"Download Excel #{sid}", data=out, file_name=f"submission_{sid}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"ex_{sid}")
             with col2:
-                # PDF
                 cur.execute("SELECT s.id, u.username, s.timestamp, s.result_json FROM submissions s JOIN users u ON u.id = s.user_id WHERE s.id = ?", (sid,))
                 r = cur.fetchone()
                 sid2, username, timestamp, result_json = r
@@ -521,7 +555,7 @@ elif page == "Hasil Akhir Penilaian":
         "📊 Download Excel",
         data=excel_bytes,
         file_name=f"hasil_ahp_{sid}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
     )
 
 # ------------------------------

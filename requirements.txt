@@ -4,3 +4,7 @@ pandas
 numpy
 reportlab.lib.pagesizes
 openpyxl
+reportlab.pdfgen
+reportlab.lib.units
+reportlab.lib
+

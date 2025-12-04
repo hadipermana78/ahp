@@ -430,7 +430,7 @@ if page == "Isi Kuesioner":
                     (user['id'], ts, json.dumps(main_pairs_store), json.dumps(sub_pairs), json.dumps(result)))
         conn.commit()
         st.success("Hasil berhasil disimpan.")
-        st.experimental_rerun()
+        st.rerun()
 
 # ------------------------------
 # Halaman: My Submissions
@@ -692,3 +692,4 @@ elif page == "Laporan Final Gabungan Pakar":
         file_name="AHP_Final_Gabungan.pdf",
         mime="application/pdf"
     )
+

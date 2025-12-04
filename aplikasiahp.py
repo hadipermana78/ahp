@@ -123,6 +123,13 @@ RI_DICT = {1:0.0,2:0.0,3:0.58,4:0.90,5:1.12,6:1.24,7:1.32,8:1.41,9:1.45,10:1.49}
 # ------------------------------
 # Database helpers
 # ------------------------------
+def delete_submission(submission_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
+    conn.commit()
+    conn.close()
+
 def init_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     cur = conn.cursor()
@@ -561,35 +568,70 @@ elif page == "Hasil Akhir Penilaian":
 # ------------------------------
 # Halaman: Admin Panel
 # ------------------------------
-elif user['is_admin'] and page == "Admin Panel":
-    st.header("Admin Panel — Semua Submission")
-    cur.execute("""SELECT s.id, u.username, s.timestamp, s.result_json
-                   FROM submissions s JOIN users u ON u.id = s.user_id ORDER BY s.id DESC""")
-    allrows = cur.fetchall()
-    st.write(f"Total submission: {len(allrows)}")
-    all_global = []
-    for sid, username, ts, js in allrows:
-        res = json.loads(js)
-        for row in res['global']:
-            row2 = dict(row)
-            row2.update({"submission_id": sid, "username": username, "timestamp": ts})
-            all_global.append(row2)
-    if all_global:
-        df_all = pd.DataFrame(all_global)
-        out = BytesIO()
-        with pd.ExcelWriter(out, engine="openpyxl") as writer:
-            df_all.to_excel(writer, sheet_name="All_Global", index=False)
-        out.seek(0)
-        st.download_button("Download Semua Global Weights (Excel)", data=out, file_name="all_global_weights.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+# ===============================
+# ADMIN PANEL
+# ===============================
+elif page == "Admin Panel" and user_is_admin:
 
-    for sid, username, ts, js in allrows:
-        with st.expander(f"#{sid} — {username} — {ts}"):
-            res = json.loads(js)
-            st.write("Top 10 Global Weights:")
-            st.table(pd.DataFrame(res['global']).sort_values("GlobalWeight", ascending=False).head(10))
-            submission_row = {"id": sid, "username": username, "timestamp": ts, "result": res}
-            pdf_bio = generate_pdf_bytes(submission_row)
-            st.download_button("Unduh PDF", data=pdf_bio, file_name=f"submission_{sid}.pdf", mime="application/pdf", key=f"adm_pdf_{sid}")
+    st.title("📊 Admin Panel – Manajemen Penilaian Pakar")
+
+    # Ambil semua penilaian
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query("""
+        SELECT submissions.id, users.username, submissions.timestamp
+        FROM submissions
+        JOIN users ON submissions.user_id = users.id
+        ORDER BY submissions.timestamp DESC
+    """, conn)
+    conn.close()
+
+    if df.empty:
+        st.info("Belum ada data penilaian.")
+        st.stop()
+
+    st.subheader("📄 Daftar Semua Penilaian")
+    st.dataframe(df)
+
+    st.subheader("🗑 Hapus Penilaian")
+
+    delete_id = st.selectbox(
+        "Pilih ID penilaian yang ingin dihapus",
+        df["id"].tolist()
+    )
+
+    # Tampilkan informasi penilaian yang dipilih
+    row = df[df["id"] == delete_id].iloc[0]
+    st.write(f"**User:** {row['username']}  \n**Waktu:** {row['timestamp']}")
+
+    # Konfirmasi delete
+    konfirmasi = st.checkbox("Saya yakin ingin menghapus penilaian ini")
+
+    if st.button("⚠ Hapus Penilaian", type="primary"):
+        if not konfirmasi:
+            st.warning("Centang konfirmasi terlebih dahulu.")
+            st.stop()
+
+        delete_submission(delete_id)
+        st.success(f"Penilaian dengan ID {delete_id} berhasil dihapus.")
+
+        st.experimental_rerun()
+
+        # -------------------------
+        # KONFIRMASI DELETE
+        # -------------------------
+        confirm = st.checkbox(
+            f"Saya yakin ingin menghapus penilaian ID {delete_id}",
+            help="Centang untuk mengonfirmasi penghapusan"
+        )
+
+        if st.button("Hapus Penilaian Sekarang", type="primary"):
+            if confirm:
+                delete_submission(delete_id)
+                st.success(f"Penilaian dengan ID {delete_id} berhasil dihapus!")
+                st.experimental_rerun()
+            else:
+                st.error("Konfirmasi dulu sebelum menghapus penilaian.")
+
 
 # ------------------------------
 # Halaman: Laporan Final Gabungan Pakar
@@ -692,4 +734,145 @@ elif page == "Laporan Final Gabungan Pakar":
         file_name="AHP_Final_Gabungan.pdf",
         mime="application/pdf"
     )
+# ------------------------------
+# Halaman: Laporan Final Gabungan Pakar
+# ------------------------------
+elif user['is_admin'] and page == "Laporan Final Gabungan Pakar":
+    st.header("Laporan Final Gabungan Pakar (AHP)")
 
+    # Ambil semua submission terbaru per pengguna
+    cur.execute("""
+        SELECT u.username, s.result_json
+        FROM users u
+        JOIN (
+            SELECT user_id, MAX(id) AS max_id
+            FROM submissions
+            GROUP BY user_id
+        ) AS latest ON latest.user_id = u.id
+        JOIN submissions s ON s.id = latest.max_id
+        ORDER BY u.username
+    """)
+    experts = cur.fetchall()
+
+    if not experts:
+        st.warning("Belum ada submission dari pakar.")
+        st.stop()
+
+    st.success(f"Ditemukan {len(experts)} pakar dengan submission terbaru.")
+
+    # -------------------------------------------
+    # 1) Gabungkan bobot kriteria utama (geometric mean)
+    # -------------------------------------------
+    all_main = []
+
+    for username, rjson in experts:
+        res = json.loads(rjson)
+        all_main.append(np.array(res["main"]["weights"]))
+
+    main_matrix = np.vstack(all_main)
+    gm_main = np.exp(np.mean(np.log(main_matrix), axis=0))
+
+    # Normalisasi
+    gm_main = gm_main / gm_main.sum()
+
+    df_main = pd.DataFrame({
+        "Kriteria": CRITERIA,
+        "Bobot Gabungan": gm_main
+    })
+
+    st.subheader("1. Bobot Gabungan Kriteria Utama")
+    st.table(df_main)
+
+    # -------------------------------------------
+    # 2) Gabungkan bobot sub-kriteria (per grup)
+    # -------------------------------------------
+    local_combined = {}
+    global_rows = []
+
+    for group in CRITERIA:
+        collect = []
+        for username, rjson in experts:
+            res = json.loads(rjson)
+            w = np.array(res["local"][group]["weights"])
+            collect.append(w)
+
+        collect = np.vstack(collect)
+        gm = np.exp(np.mean(np.log(collect), axis=0))
+        gm = gm / gm.sum()
+
+        local_combined[group] = gm
+
+        for sk, lw in zip(SUBCRITERIA[group], gm):
+            idx = CRITERIA.index(group)
+            gw = gm_main[idx] * lw
+            global_rows.append({
+                "Kriteria": group,
+                "SubKriteria": sk,
+                "LocalWeight": lw,
+                "MainWeight": gm_main[idx],
+                "GlobalWeight": gw
+            })
+
+    # -------------------------------------------
+    # 3) Bobot global gabungan
+    # -------------------------------------------
+    df_global = pd.DataFrame(global_rows).sort_values(
+        "GlobalWeight", ascending=False
+    )
+
+    st.subheader("2. Bobot Global Gabungan Semua Pakar")
+    st.table(df_global)
+
+    # Grafik
+    try:
+        import altair as alt
+        chart = alt.Chart(df_global.head(20)).mark_bar().encode(
+            x='GlobalWeight:Q',
+            y=alt.Y('SubKriteria:N', sort='-x')
+        ).properties(height=500)
+        st.altair_chart(chart, use_container_width=True)
+    except:
+        st.info("Altair tidak tersedia, grafik dilewati.")
+
+    # -------------------------------------------
+    # 4) Download Excel & PDF
+    # -------------------------------------------
+    excel_bytes = to_excel_bytes({
+        "Kriteria_Utama_Gabungan": df_main,
+        "Global_Gabungan": df_global
+    })
+
+    st.download_button(
+        "📊 Download Excel Gabungan Pakar",
+        data=excel_bytes,
+        file_name="gabungan_pakar.xlsx",
+        mime="application/vnd.openxmlformats-officedocument-spreadsheetml.sheet"
+    )
+
+    # --- PDF (pakai template PDF sebelumnya) ---
+    submission_row = {
+        "id": 0,
+        "username": "SEMUA PAKAR",
+        "timestamp": datetime.now().isoformat(),
+        "result": {
+            "main": {"keys": CRITERIA, "weights": list(map(float, gm_main)), "cons": {"CI":0, "CR":0}},
+            "local": {
+                group: {
+                    "keys": SUBCRITERIA[group],
+                    "weights": list(map(float, local_combined[group])),
+                    "cons": {"CI":0, "CR":0}
+                }
+                for group in CRITERIA
+            },
+            "global": df_global.to_dict(orient="records")
+        }
+    }
+
+    pdf_bytes = generate_pdf_bytes(submission_row)
+
+    st.download_button(
+        "📄 Download PDF Gabungan Pakar",
+        data=pdf_bytes,
+        file_name="gabungan_pakar.pdf",
+        mime="application/pdf"
+    )

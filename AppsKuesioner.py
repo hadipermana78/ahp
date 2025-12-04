@@ -591,3 +591,126 @@ if user['is_admin'] and page == "Admin Panel":
                 st.download_button("Unduh PDF", data=pdf_bio, file_name=f"submission_{sid}.pdf", mime="application/pdf")
 
 # end of file
+# ------------------------------------------------------
+# PAGE: LAPORAN FINAL GABUNGAN ANTAR PAKAR
+# ------------------------------------------------------
+elif page == "Laporan Final Gabungan Pakar":
+    st.header("Laporan Final Gabungan Antar Pakar (AIJ & AIP)")
+
+    # Ambil semua submission
+    cur.execute("""
+        SELECT s.result_json, u.username
+        FROM submissions s
+        JOIN users u ON u.id = s.user_id
+    """)
+    rows = cur.fetchall()
+
+    if not rows:
+        st.info("Belum ada pakar yang mengisi kuesioner.")
+        st.stop()
+
+    all_results = [json.loads(r[0]) for r in rows]
+    usernames = [r[1] for r in rows]
+    n_pakar = len(all_results)
+
+    st.subheader(f"Total Pakar: {n_pakar}")
+    st.write(", ".join(usernames))
+
+    # ----------------------------------------------------
+    # 1. AGGREGATION OF INDIVIDUAL JUDGMENTS (AIJ)
+    # ----------------------------------------------------
+    st.markdown("## 1. Agregasi Individual Judgments (AIJ)")
+
+    # --- Agregasi kriteria utama ---
+    st.markdown("### Bobot Kriteria Utama (AIJ)")
+
+    # Ambil semua pairwise matrix
+    all_main_matrices = []
+    for res in all_results:
+        keys = res["main"]["keys"]
+        mat = build_matrix_from_pairs(keys, {
+            (res["main"]["keys"][i], res["main"]["keys"][j]): res["main"]["mat"][i][j]
+            for i in range(len(keys)) for j in range(i+1, len(keys))
+        })
+        all_main_matrices.append(mat)
+
+    # Hitung geometric mean matrix
+    GM = np.exp(np.mean([np.log(m) for m in all_main_matrices], axis=0))
+    weights_aij = geometric_mean_weights(GM)
+    cons_aij = consistency_metrics(GM, weights_aij)
+
+    df_aij = pd.DataFrame({
+        "Kriteria": keys,
+        "Bobot (AIJ)": weights_aij
+    })
+    st.table(df_aij)
+    st.write(f"CI = {cons_aij['CI']:.4f}, CR = {cons_aij['CR']:.4f}")
+
+    # ----------------------------------------------------
+    # 2. AGGREGATION OF INDIVIDUAL PRIORITIES (AIP)
+    # ----------------------------------------------------
+    st.markdown("## 2. Agregasi Individual Priorities (AIP)")
+
+    matrices = []
+    for res in all_results:
+        matrices.append(np.array(res["main"]["weights"]))
+
+    AIP_vector = np.prod(matrices, axis=0) ** (1/n_pakar)
+    AIP_vector = AIP_vector / np.sum(AIP_vector)
+
+    df_aip = pd.DataFrame({
+        "Kriteria": keys,
+        "Bobot (AIP)": AIP_vector
+    })
+    st.table(df_aip)
+
+    # ----------------------------------------------------
+    # 3. Gabungan Ranking Global
+    # ----------------------------------------------------
+    st.markdown("## 3. Ranking Global Sub-Kriteria (AIJ & AIP)")
+
+    all_global = []
+    for res in all_results:
+        all_global.append(pd.DataFrame(res["global"]))
+
+    merged = pd.concat(all_global)
+    merged = merged.groupby("SubKriteria").agg({"GlobalWeight":"mean"})
+    merged = merged.sort_values("GlobalWeight", ascending=False)
+
+    st.table(merged)
+
+    # ----------------------------------------------------
+    # 4. Unduhan laporan final
+    # ----------------------------------------------------
+    st.markdown("## 4. Unduh Laporan Final")
+
+    # EXCEL EXPORT
+    excel_bytes = to_excel_bytes({
+        "AHP_Kriteria_AIJ": df_aij,
+        "AHP_Kriteria_AIP": df_aip,
+        "Ranking_Global": merged.reset_index()
+    })
+
+    st.download_button(
+        "📊 Download Excel Final",
+        data=excel_bytes,
+        file_name="AHP_Final_Gabungan.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # PDF EXPORT
+    pdf_bytes = generate_pdf_bytes({
+        "username": "TIM PAKAR",
+        "timestamp": "Gabungan",
+        "result": {
+            "main": {"keys": keys, "weights": weights_aij},
+            "global": merged.reset_index().to_dict(orient="records")
+        }
+    })
+
+    st.download_button(
+        "📄 Download PDF Final",
+        data=pdf_bytes,
+        file_name="AHP_Final_Gabungan.pdf",
+        mime="application/pdf"
+    )

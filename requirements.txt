@@ -2,9 +2,8 @@ streamlit
 plotly
 pandas
 numpy
-reportlab.lib.pagesizes
+reportlab
 openpyxl
-reportlab.pdfgen
-reportlab.lib.units
-reportlab.lib
+
+
 

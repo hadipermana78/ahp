@@ -4,7 +4,8 @@ pandas
 numpy
 reportlab
 openpyxl
-CryptContext
+
+
 
 
 

@@ -264,7 +264,7 @@ def generate_pdf_bytes(submission_row):
         if grpinfo['cons']['CR'] > 0.1:
             if y < margin + 20*mm:
                 c.showPage(); y = height - margin
-            c.drawString(x+2*mm, y, f"Perhatian: CR>0.1 pada {grp} (CR={grpinfo['cons']['CR']:.3f})")
+            c.drawString(x+2*mm, y, f"Peran: CR>0.1 pada {grp} (CR={grpinfo['cons']['CR']:.3f})")
             y -= 5*mm
 
     # Footer
@@ -309,7 +309,7 @@ if auth_mode == "Register":
     st.sidebar.subheader("Daftar pengguna baru")
     new_user = st.sidebar.text_input("Username reg")
     new_pw = st.sidebar.text_input("Password reg", type="password")
-    admin_check = st.sidebar.checkbox("Daftarkan sebagai admin (hati-hati)")  # optional
+    admin_check = st.sidebar.checkbox("Daftar sebagai admin")  # optional
     if st.sidebar.button("Daftar"):
         ok, msg = register_user(new_user, new_pw, 1 if admin_check else 0)
         st.sidebar.info(msg)
@@ -714,3 +714,4 @@ elif page == "Laporan Final Gabungan Pakar":
         file_name="AHP_Final_Gabungan.pdf",
         mime="application/pdf"
     )
+

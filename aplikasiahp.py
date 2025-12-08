@@ -298,7 +298,7 @@ if auth_mode == "Register":
     st.sidebar.subheader("Daftar pengguna baru")
     new_user = st.sidebar.text_input("Username reg")
     new_pw = st.sidebar.text_input("Password reg", type="password")
-    admin_check = st.sidebar.checkbox("Daftarkan sebagai admin (hati-hati)")
+    #admin_check = st.sidebar.checkbox("Daftar sebagai admin ")
     if st.sidebar.button("Daftar"):
         ok, msg = register_user(new_user, new_pw, 1 if admin_check else 0)
         st.sidebar.info(msg)
@@ -907,5 +907,6 @@ elif user['is_admin'] and page == "Laporan Final Gabungan Pakar":
         file_name="gabungan_pakar.pdf",
         mime="application/pdf"
     )
+
 
 
